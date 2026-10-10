@@ -1,0 +1,55 @@
+# Ever Gauzy API + PostgreSQL for the Vercel-hosted webapp (ZCZ-262).
+# Runs as Hostinger Docker project `gauzy-api` on VPS srv2041209.
+# Traefik (Docker project `traefik`) terminates TLS for the public API hostname.
+# Images are pinned to upstream release v111.48.2 (commit 5b3f778e1d).
+# Environment: `.env.demo.compose` from this repository plus the overrides
+# listed in `api.env.template`; generated values live only in the project .env on the VPS.
+name: gauzy-api
+
+services:
+  db:
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASS}
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB} || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - db_data:/var/lib/postgresql/data/
+    mem_limit: 768m
+    networks: [internal]
+
+  api:
+    image: ghcr.io/ever-co/gauzy-api@sha256:c455adadd334e37319a8c516f78a11bdd5f5a11556207b73583f223ba4de1ba5
+    env_file: [.env]
+    entrypoint: './entrypoint.compose.sh'
+    command: ['node', 'main.js']
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - api_public:/srv/gauzy/apps/api/public
+    mem_limit: 2g
+    cpus: 1.5
+    networks: [internal]
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=gauzy-api_internal
+      - traefik.http.routers.gauzy-api.rule=Host(`gauzy-api.srv2041209.hstgr.cloud`)
+      - traefik.http.routers.gauzy-api.entrypoints=websecure
+      - traefik.http.routers.gauzy-api.tls.certresolver=letsencrypt
+      - traefik.http.services.gauzy-api.loadbalancer.server.port=3000
+
+volumes:
+  db_data: {}
+  api_public: {}
+
+networks:
+  internal:
+    driver: bridge
